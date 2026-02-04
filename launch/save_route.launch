@@ -23,10 +23,10 @@
 -->
 
 <launch>
+  <arg name="path" default=""/>
   <executable
     launch-prefix="ros2 service call"
-    cmd="/teach_route/save std_srvs/srv/Trigger"
+    cmd="/teach_route/save roselito_agent_interface/srv/SaveInterfaceRoute '{path: '$(var path)'}'"
     output="screen"
   />
 </launch>
-

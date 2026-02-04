@@ -19,7 +19,6 @@ r'''Record route waypoints for later replay.
     Author: Helio Perroni Filho
 '''
 
-
 import rclpy
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 
@@ -27,9 +26,14 @@ from geometry_msgs import msg as geometry_msg
 from nav_msgs import msg as nav_msg
 from std_srvs import srv as std_srv
 
-from tf2_ros import TransformException
+# Importação da interface customizada para suportar o argumento 'path'
+from roselito_agent_interface.srv import SaveInterfaceRoute 
+
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+
+# Importando a função comum do seu pacote roselito_agent
+from roselito_agent.get_robot_pose import get_robot_pose
 
 
 class TeachRoute(rclpy.node.Node):
@@ -39,6 +43,8 @@ class TeachRoute(rclpy.node.Node):
         r'''Create a new route recorder node.
         '''
         super().__init__('teach_route')
+        
+        # Declaração de parâmetros
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('robot_base_frame', 'base_footprint')
         self.declare_parameter('save_path', 'route.pon')
@@ -50,6 +56,7 @@ class TeachRoute(rclpy.node.Node):
         self.__buffer = Buffer()
         self.__listener = TransformListener(self.__buffer, self)
 
+        # Publisher para visualização da rota no RViz
         self.__pub_route = self.create_publisher(
             nav_msg.Path, '~/route',
             QoSProfile(
@@ -62,42 +69,38 @@ class TeachRoute(rclpy.node.Node):
         self.__route = nav_msg.Path()
         self.__route.header.frame_id = self.__global_frame
 
+        # Definição dos serviços
         self.__push = self.create_service(std_srv.Trigger, '~/push', self.__callback_push)
         self.__pop = self.create_service(std_srv.Trigger, '~/pop', self.__callback_pop)
-        self.__save = self.create_service(std_srv.Trigger, '~/save', self.__callback_save)
+        
+        # Serviço customizado para salvar a rota com caminho específico
+        self.__save = self.create_service(SaveInterfaceRoute, '~/save', self.__callback_save)
 
     def __callback_push(self, request, response):
         r'''Handle a waypoint recording service request.
         '''
-        try:
-            transform = self.__buffer.lookup_transform(
-                self.__global_frame,
-                self.__robot_frame,
-                rclpy.time.Time()
-            )
-        except TransformException as e:
+        # Utiliza a função comum para capturar a posição atual
+        pose = get_robot_pose(
+            self, 
+            self.__buffer, 
+            self.__global_frame, 
+            self.__robot_frame
+        )
+
+        if pose is None:
             response.success = False
-            response.message = f'Error computing transform from robot to global frame: "{e}"'
+            response.message = 'Error: Could not retrieve robot pose via TF.'
             return response
 
-        now = self.get_clock().now().to_msg()
-
-        pose = geometry_msg.PoseStamped()
-        pose.header.frame_id = self.__global_frame
-        pose.header.stamp = now
-
-        translation = transform.transform.translation
-        pose.pose.position.x = translation.x
-        pose.pose.position.y = translation.y
-        pose.pose.position.z = translation.z
-        pose.pose.orientation = transform.transform.rotation
-
+        # Adiciona a pose à lista da rota
         self.__route.poses.append(pose)
-        self.__route.header.stamp = now
+        self.__route.header.stamp = self.get_clock().now().to_msg()
 
+        # Atualiza a visualização no RViz
         self.__pub_route.publish(self.__route)
 
         response.success = True
+        response.message = f'Waypoint added at index {len(self.__route.poses) - 1}'
         return response
 
     def __callback_pop(self, request, response):
@@ -107,17 +110,33 @@ class TeachRoute(rclpy.node.Node):
             self.__route.poses.pop()
             self.__route.header.stamp = self.get_clock().now().to_msg()
             self.__pub_route.publish(self.__route)
+            response.success = True
+            response.message = 'Last waypoint removed.'
+        else:
+            response.success = False
+            response.message = 'No waypoints to remove.'
 
-        response.success = True
         return response
 
     def __callback_save(self, request, response):
         r'''Handle the route file saving service request.
         '''
-        with open(self.__save_path, 'w') as out:
-            out.write(f'{repr(self.__route)}\n')
+        # Usa o caminho fornecido no serviço ou o padrão do parâmetro
+        target_path = request.path if request.path else self.__save_path
 
-        response.success = True
+        try:
+            with open(target_path, 'w') as out:
+                # O formato repr() é necessário para o eval() no replay_route
+                out.write(f'{repr(self.__route)}\n')
+            
+            response.success = True
+            response.message = f"Route successfully saved to: {target_path}"
+            self.get_logger().info(response.message)
+        except Exception as e:
+            response.success = False
+            response.message = f"Failed to save route: {str(e)}"
+            self.get_logger().error(response.message)
+
         return response
 
 
@@ -131,6 +150,9 @@ def main():
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':

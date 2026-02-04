@@ -24,6 +24,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rclpy REQUIRED)
+find_package(roselito_agent_interface REQUIRED)
 
 # Build Python sources.
 ament_python_install_package(${PROJECT_NAME})
