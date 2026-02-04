@@ -26,9 +26,21 @@ To save the route file, call:
 ros2 launch roselito_agent save_route.launch
 ```
 
+To save to a specific path, run:
+
+```bash
+ros2 service call /teach_route/save roselito_agent_interface/srv/SaveInterfaceRoute "{path: 'aboslute/path/to/route.pon'}"
+```
+
 To replay a recorded route, call:
 ```bash
 ros2 launch roselito_agent replay_route.launch path:=/absolute/path/to/route.pon
+```
+
+To run replay with a custom dist_threshold, run:
+
+```bash
+ros2 launch roselito_agent replay_route.launch path:=/absolute/path/to/route.pon dist_threshold:={float}
 ```
 
 The `path` argument can be omitted, in which case the route is loaded from a file named `route.pon` in the current folder.
